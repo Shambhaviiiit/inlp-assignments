@@ -32,6 +32,7 @@ class FFNNLanguageModel(nn.Module):
         self.fc1 = nn.Linear(context_size * embedding_dim, hidden_dim)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_dim, vocab_size)
+        self.window_size = context_size
     
     def forward(self, inputs):
         embeds = self.embeddings(inputs).view((inputs.shape[0], -1))
@@ -102,12 +103,23 @@ def train_model(model, train_loader, epochs=10):
             total_loss += loss.item()
         print(f"Epoch {epoch+1}, Loss: {total_loss/len(train_loader)}")
 
-def predict_next_k_words(model, context, vocab, top_k=1):
-    context_indices = torch.tensor([vocab[word] for word in context], dtype=torch.long).unsqueeze(0)
+def predict_next_k_words(model, context, vocab, k):
+    if isinstance(context, str):
+        context_tokens = context.strip().split()
+    else:
+        context_tokens = context
+    # If the model uses a fixed context window (e.g., FFNN), truncate the context tokens.
+    if hasattr(model, "window_size"):
+        context_tokens = context_tokens[-model.window_size:]
+    unk_token = '<unk>'
+    context_indices = torch.tensor(
+        [vocab[word] if word in vocab else vocab[unk_token] for word in context_tokens],
+        dtype=torch.long
+    ).unsqueeze(0)
     with torch.no_grad():
         output = model(context_indices)
     probabilities = torch.softmax(output, dim=1)
-    top_k_indices = torch.topk(probabilities, top_k).indices.squeeze(0).tolist()
+    top_k_indices = torch.topk(probabilities, k).indices.squeeze(0).tolist()
     idx_to_word = {idx: word for word, idx in vocab.items()}
     return [idx_to_word[idx] for idx in top_k_indices]
 
@@ -195,7 +207,7 @@ if __name__ == "__main__":
         ngrams_3.extend(create_ngrams(padded_3, 3))
         ngrams_5.extend(create_ngrams(padded_5, 5))
 
-    print("Example 3-grams:", ngrams_3[:10])
+    # print("Example 3-grams:", ngrams_3[:10])
     
     # Convert n-grams to indices
     indices_3 = ngrams_to_indices(ngrams_3, vocab)
@@ -317,7 +329,7 @@ if __name__ == "__main__":
         predictions_3 = predict_next_k_words(model_3, context_tokens, vocab, top_k)
         predictions_5 = predict_next_k_words(model_5, context_tokens, vocab, top_k)
         print("3-gram LM, Top", top_k, "predicted words:", predictions_3)
-        print("5-gram LM, Top", top_k, "predicted words:", predictions_3)
+        # print("5-gram LM, Top", top_k, "predicted words:", predictions_3)
 
     else:
         train_model(model_3, train_loader_3, epochs=10)
@@ -332,6 +344,3 @@ if __name__ == "__main__":
 
         print("Average Perplexity for 3-gram LM on training dataset:", avg_pp_3_train)
         print("Average Perplexity for 5-gram LM on training dataset:", avg_pp_5_train)
-
-
-    
